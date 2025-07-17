@@ -3,13 +3,13 @@ name: Pipeline Completa de Scrapping e Envio (Novo Bot)
 on:
   schedule:
     # Executa a cada 10 minutos (ajuste conforme sua necessidade)
-    - cron: '*/10 * * * *' # Exemplo: a cada 10 minutos
+    #- cron: '*/10 * * * *' # Exemplo: a cada 10 minutos
     # Horários específicos podem ser úteis para ofertas
-    - cron: '45 9 * * *'  # 06:45 AM BRT
-    - cron: '45 11 * * *' # 08:45 AM BRT
-    - cron: '45 14 * * *' # 11:45 AM BRT
-    - cron: '45 19 * * *' # 04:45 PM BRT
-    - cron: '45 22 * * *' # 07:45 PM BRT
+    #- cron: '45 9 * * *'  # 06:45 AM BRT
+    #- cron: '45 11 * * *' # 08:45 AM BRT
+    #- cron: '45 14 * * *' # 11:45 AM BRT
+    #- cron: '45 19 * * *' # 04:45 PM BRT
+    #- cron: '45 22 * * *' # 07:45 PM BRT
       
   workflow_dispatch: # Permite execução manual de toda a pipeline
 
