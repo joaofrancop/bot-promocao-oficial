@@ -6,18 +6,45 @@ from playwright.async_api import async_playwright, Page, BrowserContext
 
 # Função para carregar os cookies do JSON
 def load_cookies_from_json(json_string: str) -> list:
-    """Converte uma string JSON de cookies em um formato que o Playwright entenda."""
+    """Converte uma string JSON de cookies em um formato que o Playwright entenda,
+    tratando o atributo sameSite."""
     cookies = json.loads(json_string)
-    # O Playwright espera que os cookies tenham um 'url' ou 'domain'
-    # Adicione 'url' se não estiver presente, usando um domínio padrão do ML
+    
+    # Valores válidos para sameSite que o Playwright aceita
+    valid_same_site_values = ["Strict", "Lax", "None"] 
+
     for cookie in cookies:
-        if 'url' not in cookie and 'domain' in cookie:
-            # Reconstruir a URL com base no domínio e path
-            # Pode ser necessário ajustar o protocolo para https
-            cookie['url'] = f"https://{cookie['domain']}{cookie['path']}"
-        elif 'url' not in cookie and 'domain' not in cookie:
-            # Fallback para cookies sem domain/url explicitos
-            cookie['url'] = "https://www.mercadolivre.com.br/" 
+        # Garante que 'url' esteja presente ou pode ser inferida de 'domain' e 'path'
+        # Playwright prefere 'url' explicitamente.
+        if 'url' not in cookie:
+            if 'domain' in cookie and 'path' in cookie:
+                # Tenta reconstruir a URL. Assume HTTPS para domínios web
+                protocol = "https://"
+                # Para domínios que começam com '.', Playwright espera sem o '.' inicial
+                domain = cookie['domain']
+                if domain.startswith('.'):
+                    domain = domain[1:]
+                cookie['url'] = f"{protocol}{domain}{cookie['path']}"
+            else:
+                # Fallback se 'domain'/'path' também estiverem ausentes. 
+                # Pode indicar um cookie malformado ou não web.
+                cookie['url'] = "https://www.mercadolivre.com.br/" # Um fallback padrão
+
+        # --- CORREÇÃO PARA O ERRO sameSite ---
+        if 'sameSite' in cookie:
+            # Se o valor não for um dos esperados, ou for vazio, ou for None como bool,
+            # converta para a string "None" esperada pelo Playwright.
+            if cookie['sameSite'] not in valid_same_site_values or \
+               cookie['sameSite'] == "" or \
+               cookie['sameSite'] is None: # Adiciona verificação para None booleano
+                cookie['sameSite'] = "None"
+            # No caso de o exportador de cookies usar 'None' como string, já está correto.
+            # Caso contrário (Strict, Lax), o valor já está ok.
+        else:
+            # Se 'sameSite' não estiver presente, Playwright lida com seu default.
+            pass
+        # --- FIM DA CORREÇÃO sameSite ---
+
     return cookies
 
 async def generate_affiliate_links_with_playwright(product_urls: list, affiliate_tag: str):
@@ -64,9 +91,10 @@ async def generate_affiliate_links_with_playwright(product_urls: list, affiliate
         print("Tentando acessar o painel de afiliados com cookies...")
         try:
             await page.goto("https://www.mercadolivre.com.br/affiliate-program/panel", wait_until="load", timeout=30000)
-            # Verifica se foi redirecionado para login (indicando cookies expirados)
-            if "login" in page.url or "security" in page.url or "verifica" in page.url:
-                print(f"ERRO: Os cookies expiraram ou são inválidos. Redirecionado para a página: {page.url}")
+            # Verifica se foi redirecionado para login (indicando cookies expirados ou 2FA)
+            # Adicionando 'login' e 'seguridad' como verificações
+            if "login" in page.url or "security" in page.url or "verifica" in page.url or "seguridad" in page.url:
+                print(f"ERRO: Os cookies expiraram, são inválidos ou 2FA ativado. Redirecionado para a página: {page.url}")
                 print("Por favor, faça login manual no Mercado Livre, exporte os novos cookies e atualize o secret ML_COOKIES_JSON.")
                 await browser.close()
                 return [None] * len(product_urls), [None] * len(product_urls)
