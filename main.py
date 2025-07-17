@@ -2,6 +2,7 @@ import asyncio
 import pandas as pd
 import os
 import sys # Importe sys para sys.exit
+import re
 from src.affiliate_link_generator import generate_affiliate_links_with_playwright
 
 # Importações para o scraping do Mercado Livre (coloque o código do scraping aqui ou em um novo módulo)
