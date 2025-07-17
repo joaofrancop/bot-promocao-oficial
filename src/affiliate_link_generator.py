@@ -1,43 +1,75 @@
 import os
 import json
 import asyncio
-import time
+import time # Importe time para usar time.sleep
 from playwright.async_api import async_playwright, Page, BrowserContext
 
-# Função para carregar os cookies do JSON
+# Função para carregar os cookies do JSON (VERSÃO MAIS ROBUSTA)
 def load_cookies_from_json(json_string: str) -> list:
     """Converte uma string JSON de cookies em um formato que o Playwright entenda,
-    tratando o atributo sameSite e garantindo 'url' ou 'domain'."""
+    tratando o atributo sameSite e garantindo 'url' ou 'domain' para cada cookie.
+    """
     cookies = json.loads(json_string)
-
+    
     valid_same_site_values = ["Strict", "Lax", "None"] # Valores aceitos pelo Playwright
+    default_base_url = "https://www.mercadolivre.com.br/" # URL fallback padrão
 
+    processed_cookies = [] # Lista para armazenar cookies processados
     for cookie in cookies:
-        # --- CORREÇÃO PARA O ERRO 'Cookie should have either url or domain' ---
-        # Se o cookie não tem 'url' e não tem 'domain', ou se 'domain' está vazio/malformado
-        if 'url' not in cookie or not cookie['url']: # Se 'url' não existe ou está vazia
-            if 'domain' in cookie and cookie['domain']: # Se 'domain' existe e não está vazio
-                domain = cookie['domain']
-                # Remover o ponto inicial se houver (ex: .mercadolivre.com.br -> mercadolivre.com.br)
-                if domain.startswith('.'):
-                    domain = domain[1:]
-                # Tentar construir a URL. Assume HTTPS e um path padrão se não houver
-                path = cookie.get('path', '/') # Pega o path do cookie ou usa '/' como padrão
-                cookie['url'] = f"https://{domain}{path}"
-            else:
-                # Se não tem 'url' e 'domain' também não é útil, use um fallback genérico do ML
-                cookie['url'] = "https://www.mercadolivre.com.br/"
-        # --- FIM DA CORREÇÃO 'Cookie should have either url or domain' ---
+        # Garante que o cookie seja um dicionário e contenha as chaves básicas (name e value)
+        if not isinstance(cookie, dict) or 'name' not in cookie or 'value' not in cookie:
+            print(f"Aviso: Cookie malformado ignorado: {cookie}")
+            continue # Pula este cookie se ele não for válido
 
-        # --- TRATAMENTO PARA O ERRO sameSite (já feito antes) ---
+        # --- TRATAMENTO PARA 'url' ou 'domain' (CORREÇÃO DE ERRO ANTERIOR) ---
+        # Prioriza 'url' se já estiver presente e não vazia
+        if 'url' in cookie and cookie['url']:
+            pass # A URL já está ok
+        elif 'domain' in cookie and cookie['domain']: # Se 'domain' existe e não está vazio
+            domain = cookie['domain']
+            # Remover o ponto inicial se houver (ex: .mercadolivre.com.br -> mercadolivre.com.br)
+            if domain.startswith('.'):
+                domain = domain[1:]
+            # Tentar construir a URL. Assume HTTPS e um path padrão se não houver
+            path = cookie.get('path', '/') # Pega o path do cookie ou usa '/' como padrão
+            cookie['url'] = f"https://{domain}{path}"
+        else:
+            # Se não tem 'url' nem 'domain' útil, atribui uma URL padrão
+            cookie['url'] = default_base_url
+        # --- FIM TRATAMENTO 'url' ou 'domain' ---
+
+        # --- TRATAMENTO PARA sameSite (CORREÇÃO DE ERRO ANTERIOR) ---
         if 'sameSite' in cookie:
             if cookie['sameSite'] not in valid_same_site_values or \
                cookie['sameSite'] == "" or \
                cookie['sameSite'] is None: 
-                cookie['sameSite'] = "None"
+                cookie['sameSite'] = "None" # Garante que seja a string "None"
+        else:
+            # Se 'sameSite' não está presente, adicione-o como "None" explicitamente para consistência
+            cookie['sameSite'] = "None"
         # --- FIM TRATAMENTO sameSite ---
 
-    return cookies
+        # --- TRATAMENTO PARA 'expires' (CORREÇÃO DE ERRO ANTERIOR) ---
+        # Assegura que o expires esteja em segundos (timestamp UNIX) e seja um int
+        if 'expires' in cookie:
+            if isinstance(cookie['expires'], (int, float)):
+                # Playwright espera um timestamp UNIX em segundos
+                # Se vier em milissegundos (comum em JS), converta (ex: se for um valor muito grande, > ano 2050)
+                if cookie['expires'] > 2524608000: # Exemplo: um timestamp após 2050 (provável milissegundos)
+                    cookie['expires'] = int(cookie['expires'] / 1000)
+                cookie['expires'] = int(cookie['expires']) # Garante que é um int
+            else:
+                # Se 'expires' não for número, defina um expires padrão (ex: 7 dias a partir de agora)
+                print(f"Aviso: 'expires' do cookie '{cookie.get('name')}' não é numérico. Definindo padrão.")
+                cookie['expires'] = int(time.time() + 3600 * 24 * 7) 
+        else:
+            # Adiciona um expires padrão se não houver (ex: 7 dias)
+            cookie['expires'] = int(time.time() + 3600 * 24 * 7)
+
+        # Adiciona o cookie processado
+        processed_cookies.append(cookie)
+
+    return processed_cookies
 
 async def generate_affiliate_links_with_playwright(product_urls: list, affiliate_tag: str):
     """
@@ -45,7 +77,7 @@ async def generate_affiliate_links_with_playwright(product_urls: list, affiliate
     Espera que o secret ML_COOKIES_JSON e ML_AFFILIATE_TAG estejam configurados.
     """
     print("Iniciando geração de links de afiliado com Playwright via cookies...")
-
+    
     # 1. Obter o JSON de cookies e a TAG do GitHub Secret (ou hardcoded se preferir temporariamente)
     cookies_json = os.getenv("ML_COOKIES_JSON")
     # Se estiver hardcodando temporariamente por teste, remova a linha acima e use:
@@ -58,7 +90,7 @@ async def generate_affiliate_links_with_playwright(product_urls: list, affiliate
     if not affiliate_tag:
         print("ERRO: A TAG de afiliado não foi definida. Os links podem não ser gerados corretamente.")
         # O bot pode continuar, mas os links gerados podem não ter a TAG
-
+    
     try:
         cookies = load_cookies_from_json(cookies_json)
     except json.JSONDecodeError as e:
@@ -73,10 +105,10 @@ async def generate_affiliate_links_with_playwright(product_urls: list, affiliate
         # Lança o navegador Chromium em modo headless para o GitHub Actions
         # Para testar localmente e VER o navegador, mude headless=True para headless=False
         browser = await p.chromium.launch(headless=True) 
-
+        
         # Cria um novo contexto para a sessão e carrega os cookies
         context = await browser.new_context()
-        await context.add_cookies(cookies)
+        await context.add_cookies(cookies) # Linha 87 no seu log original
         page = await context.new_page()
 
         # Tentar navegar para o painel de afiliados (onde a sessão deveria estar ativa)
@@ -121,16 +153,16 @@ async def generate_affiliate_links_with_playwright(product_urls: list, affiliate
                 # Voltar para o painel de afiliados para limpar o formulário e garantir que está na página certa
                 await page.goto("https://www.mercadolivre.com.br/affiliate-program/panel", wait_until="load", timeout=30000)
                 await page.wait_for_selector(input_url_selector, timeout=10000) # Espera o campo de input carregar novamente
-
+                
                 await page.fill(input_url_selector, original_url)
-
+                
                 # Clicar no botão e interceptar a resposta da API de geração de link
                 # A requisição 'createLink' é interceptada para pegar os links gerados
                 async with page.expect_response(
                     lambda response: "affiliates/createLink" in response.url and response.status == 200
                 ) as response_info:
                     await page.click(generate_button_selector)
-
+                
                 response_data = await response_info.value.json()
                 item = response_data.get("urls", [{}])[0]
                 short_url = item.get("short_url")
@@ -150,8 +182,8 @@ async def generate_affiliate_links_with_playwright(product_urls: list, affiliate
                 print(f"Erro ao gerar link de afiliado para {original_url}: {e}")
                 shorts.append(None)
                 longs.append(None)
-
-            await asyncio.sleep(0.6) # Manter um pequeno delay entre as requisições
+            
+            await asyncio.sleep(0.6)
 
         await browser.close()
         return shorts, longs
