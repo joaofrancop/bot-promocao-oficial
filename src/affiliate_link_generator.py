@@ -1,94 +1,110 @@
 import os
 import json
 import asyncio
-import time # Importe time para usar time.sleep
+import time
 from playwright.async_api import async_playwright, Page, BrowserContext, expect
 
-# Função para carregar os cookies do JSON (VERSÃO MAIS ROBUSTA E FINAL)
+# Função para carregar os cookies do JSON (VERSÃO COM LOGS DE DEBUG E ADIÇÃO INDIVIDUAL)
 def load_cookies_from_json(json_string: str) -> list:
     """Converte uma string JSON de cookies em um formato que o Playwright entenda,
     tratando atributos como sameSite, url/domain e expires para garantir compatibilidade.
+    Adiciona logs detalhados para depuração de cookies.
     """
+    print("DEBUG: Iniciando load_cookies_from_json...")
     cookies = json.loads(json_string)
     
     valid_same_site_values = ["Strict", "Lax", "None"] 
     default_base_url = "https://www.mercadolivre.com.br/" 
 
     processed_cookies = [] 
-    for cookie in cookies:
-        # Garante que o cookie seja um dicionário e contenha as chaves básicas
+    for i, cookie in enumerate(cookies):
+        print(f"\nDEBUG: --- Processando cookie {i+1}/{len(cookies)}: '{cookie.get('name', 'N/A')}' ---")
+        print(f"DEBUG: Cookie Original: {cookie}")
+
         if not isinstance(cookie, dict) or 'name' not in cookie or 'value' not in cookie:
-            print(f"Aviso: Cookie malformado (faltando nome/valor) ignorado: {cookie}")
+            print(f"DEBUG: AVISO: Cookie malformado (faltando nome/valor) ignorado: {cookie}")
             continue 
 
-        # --- TRATAMENTO PARA 'url' ou 'domain' ---
-        # Playwright exige 'url'. Se não houver, tenta construir a partir de 'domain' e 'path'.
-        # Se nem 'domain' for útil, usa uma URL padrão.
-        if 'url' not in cookie or not cookie['url']: # Se 'url' não existe ou está vazia
-            if 'domain' in cookie and cookie['domain']: # Se 'domain' existe e não está vazio
-                domain = cookie['domain']
-                # Remover o ponto inicial e 'www.' se houver
+        temp_cookie = cookie.copy() 
+
+        try:
+            # --- TRATAMENTO PARA 'url' ou 'domain' ---
+            original_url_attr = temp_cookie.get('url', None)
+            original_domain_attr = temp_cookie.get('domain', None)
+            original_path_attr = temp_cookie.get('path', None)
+
+            if 'url' in temp_cookie and temp_cookie['url']:
+                pass 
+            elif 'domain' in temp_cookie and temp_cookie['domain']:
+                domain = temp_cookie['domain']
                 if domain.startswith('.'):
                     domain = domain[1:]
-                if domain.startswith('www.'): # Adicionado para lidar com .www.
+                if domain.startswith('www.'): 
                     domain = domain[4:]
                 
-                path = cookie.get('path', '/') 
-                cookie['url'] = f"https://{domain}{path}"
+                path = temp_cookie.get('path', '/') 
+                temp_cookie['url'] = f"https://{domain}{path}"
+                print(f"DEBUG: Cookie '{temp_cookie['name']}' URL inferida: {temp_cookie['url']} (Original Domain: '{original_domain_attr}', Original Path: '{original_path_attr}')")
             else:
-                # Fallback se não há 'url' nem 'domain' útil
-                cookie['url'] = default_base_url
-        # --- FIM TRATAMENTO 'url' ou 'domain' ---
+                temp_cookie['url'] = default_base_url
+                print(f"DEBUG: Cookie '{temp_cookie['name']}' sem URL/Domínio válido. Usando fallback URL: {temp_cookie['url']}")
+            # --- FIM TRATAMENTO 'url' ou 'domain' ---
 
-        # --- TRATAMENTO PARA sameSite ---
-        if 'sameSite' in cookie:
-            # Converte 'null' (de JSON) ou string vazia para a string "None"
-            if cookie['sameSite'] not in valid_same_site_values or \
-               cookie['sameSite'] == "" or \
-               cookie['sameSite'] is None: 
-                cookie['sameSite'] = "None" 
-        else:
-            # Se 'sameSite' não está presente, adicione-o como "None" explicitamente
-            cookie['sameSite'] = "None"
-        # --- FIM TRATAMENTO sameSite ---
-
-        # --- TRATAMENTO PARA 'expires' ---
-        # Playwright espera um timestamp UNIX em segundos (inteiro)
-        if 'expirationDate' in cookie: # O JSON do Cookie-Editor usa 'expirationDate'
-            if isinstance(cookie['expirationDate'], (int, float)):
-                # Se for um timestamp em milissegundos (muito grande), converte para segundos
-                # Um timestamp em milissegundos é geralmente > 10^12 (após 2001)
-                # Um timestamp em segundos é geralmente < 10^11 (até 2001)
-                # Usar um valor limite como 2524608000 (após 2050) é um bom heuristic.
-                if cookie['expirationDate'] > 2524608000: 
-                    cookie['expires'] = int(cookie['expirationDate'] / 1000)
-                else: 
-                    cookie['expires'] = int(cookie['expirationDate'])
+            # --- TRATAMENTO PARA sameSite ---
+            original_same_site_attr = temp_cookie.get('sameSite', None)
+            if 'sameSite' in temp_cookie:
+                if temp_cookie['sameSite'] not in valid_same_site_values or \
+                   temp_cookie['sameSite'] == "" or \
+                   temp_cookie['sameSite'] is None: 
+                    temp_cookie['sameSite'] = "None" 
+                    print(f"DEBUG: Cookie '{temp_cookie['name']}' sameSite inválido/vazio. Definido como 'None'. (Original: '{original_same_site_attr}')")
             else:
-                # Se 'expirationDate' não for numérico, define um expires padrão (ex: 7 dias a partir de agora)
-                print(f"Aviso: 'expirationDate' do cookie '{cookie.get('name')}' não é numérico. Definindo padrão.")
-                cookie['expires'] = int(time.time() + 3600 * 24 * 7)
-            del cookie['expirationDate'] # Remove a chave original para evitar duplicidade ou conflito
-        elif 'expires' not in cookie: # Se nem 'expirationDate' nem 'expires' existem
-            # Adiciona um expires padrão (ex: 7 dias)
-            cookie['expires'] = int(time.time() + 3600 * 24 * 7)
-        # Garante que 'expires' é um inteiro
-        if 'expires' in cookie and not isinstance(cookie['expires'], int):
-            cookie['expires'] = int(cookie['expires'])
+                temp_cookie['sameSite'] = "None"
+                print(f"DEBUG: Cookie '{temp_cookie['name']}' sem sameSite. Definido como 'None'.")
+            # --- FIM TRATAMENTO sameSite ---
 
-        # --- REMOÇÃO DE ATRIBUTOS NÃO SUPORTADOS PELO PLAYWRIGHT ---
-        # Removê-los para evitar avisos ou erros
-        cookie.pop('hostOnly', None)
-        cookie.pop('session', None)
-        cookie.pop('storeId', None) 
-        cookie.pop('id', None) # 'id' também pode ser problemático, remover
+            # --- TRATAMENTO PARA 'expires' ---
+            original_expires_attr = temp_cookie.get('expires', temp_cookie.get('expirationDate', None))
+            if 'expirationDate' in temp_cookie: 
+                if isinstance(temp_cookie['expirationDate'], (int, float)):
+                    if temp_cookie['expirationDate'] > 2524608000: 
+                        temp_cookie['expires'] = int(temp_cookie['expirationDate'] / 1000)
+                    else: 
+                        temp_cookie['expires'] = int(temp_cookie['expirationDate'])
+                else:
+                    print(f"DEBUG: AVISO: 'expirationDate' do cookie '{temp_cookie['name']}' não é numérico. Definindo padrão.")
+                    temp_cookie['expires'] = int(time.time() + 3600 * 24 * 7) 
+                del temp_cookie['expirationDate'] 
+            elif 'expires' not in temp_cookie: 
+                temp_cookie['expires'] = int(time.time() + 3600 * 24 * 7)
+            
+            if 'expires' in temp_cookie and not isinstance(temp_cookie['expires'], int):
+                temp_cookie['expires'] = int(temp_cookie['expires'])
+                print(f"DEBUG: Cookie '{temp_cookie['name']}' expires convertido para int: {temp_cookie['expires']} (Original: '{original_expires_attr}')")
+            # --- FIM TRATAMENTO 'expires' ---
 
-        processed_cookies.append(cookie)
+            # --- REMOÇÃO DE ATRIBUTOS NÃO SUPORTADOS PELO PLAYWRIGHT ---
+            removed_attrs = []
+            for attr in ['hostOnly', 'session', 'storeId', 'id']: 
+                if attr in temp_cookie:
+                    temp_cookie.pop(attr)
+                    removed_attrs.append(attr)
+            if removed_attrs:
+                print(f"DEBUG: Cookie '{temp_cookie['name']}' atributos removidos: {', '.join(removed_attrs)}")
+            # --- FIM REMOÇÃO ---
+
+            processed_cookies.append(temp_cookie)
+            print(f"DEBUG: Cookie '{temp_cookie['name']}' Processado Final: {temp_cookie}")
+
+        except Exception as e:
+            print(f"DEBUG: ERRO INESPERADO ao processar cookie '{cookie.get('name', 'N/A')}': {e}")
+            print(f"DEBUG: Cookie que causou o erro: {cookie}")
+            continue 
 
     print("DEBUG: Finalizado load_cookies_from_json. Total de cookies processados:", len(processed_cookies))
     return processed_cookies
 
-# A função perform_ml_login permanece a mesma, pois a estratégia principal é cookies
+# A função perform_ml_login permanece a mesma
 async def perform_ml_login(page: Page, username: str, password: str) -> bool:
     """
     Tenta realizar o login no Mercado Livre com usuário e senha.
@@ -98,8 +114,6 @@ async def perform_ml_login(page: Page, username: str, password: str) -> bool:
     try:
         await page.goto("https://www.mercadolivre.com.br/login", wait_until="load", timeout=30000)
 
-        # Inspecione o HTML da página de login do Mercado Livre para encontrar os seletores corretos
-        # Estes são exemplos e PRECISAM ser ajustados aos seletores reais do ML
         email_input_selector = 'input[name="user_id"]' 
         continue_button_selector = 'button[type="submit"]' 
         password_input_selector = 'input[name="password"]' 
@@ -126,7 +140,7 @@ async def perform_ml_login(page: Page, username: str, password: str) -> bool:
         print(f"DEBUG: ERRO durante o login direto no Mercado Livre: {e}")
         return False
 
-# A função generate_affiliate_links_with_playwright foi atualizada para usar a lógica de login
+# A função generate_affiliate_links_with_playwright foi atualizada para tentar adicionar cookies um a um
 async def generate_affiliate_links_with_playwright(product_urls: list, affiliate_tag: str):
     """
     Gera links de afiliado do Mercado Livre usando Playwright, tentando login direto ou cookies.
@@ -134,7 +148,6 @@ async def generate_affiliate_links_with_playwright(product_urls: list, affiliate
     """
     print("Iniciando geração de links de afiliado com Playwright...")
     
-    # Obter credenciais e secrets
     ml_username = os.getenv("ML_USERNAME")
     ml_password = os.getenv("ML_PASSWORD")
     cookies_json = os.getenv("ML_COOKIES_JSON")
@@ -157,22 +170,37 @@ async def generate_affiliate_links_with_playwright(product_urls: list, affiliate
         if cookies_json:
             print("DEBUG: Tentando login com cookies...")
             try:
-                cookies = load_cookies_from_json(cookies_json)
-                await context.add_cookies(cookies) 
-                # Navegar para um URL simples para verificar se os cookies foram carregados
-                await page.goto("https://www.mercadolivre.com.br/", wait_until="load", timeout=30000)
-                print(f"DEBUG: URL após carregar cookies e ir para home: {page.url}")
+                raw_cookies = json.loads(cookies_json) # Carrega o JSON bruto
+                processed_cookies_for_playwright = load_cookies_from_json(cookies_json) # Processa os cookies
 
-                await page.goto("https://www.mercadolivre.com.br/affiliate-program/panel", wait_until="load", timeout=30000)
-                print(f"DEBUG: URL após tentar ir para painel de afiliados: {page.url}")
+                # --- NOVO BLOCO: ADICIONAR COOKIES UM POR UM PARA DEBUG ---
+                successful_cookies_count = 0
+                for i, cookie_obj in enumerate(processed_cookies_for_playwright):
+                    try:
+                        await context.add_cookies([cookie_obj]) # Tenta adicionar um cookie por vez
+                        successful_cookies_count += 1
+                        print(f"DEBUG: Cookie '{cookie_obj.get('name', 'N/A')}' adicionado com sucesso. ({successful_cookies_count}/{len(processed_cookies_for_playwright)})")
+                    except Exception as e:
+                        print(f"DEBUG: ERRO ao adicionar cookie '{cookie_obj.get('name', 'N/A')}': {e}")
+                        print(f"DEBUG: Cookie problemático: {cookie_obj}")
+                
+                if successful_cookies_count > 0:
+                    print(f"DEBUG: Total de {successful_cookies_count} cookies adicionados com sucesso.")
+                    # Agora, tente navegar para o painel para verificar a sessão
+                    await page.goto("https://www.mercadolivre.com.br/affiliate-program/panel", wait_until="load", timeout=30000)
+                    print(f"DEBUG: URL após tentar ir para painel de afiliados com cookies: {page.url}")
 
-                if "login" not in page.url and "security" not in page.url and "verifica" not in page.url and "seguridad" not in page.url:
-                    print("DEBUG: Sessão ativa com cookies.")
-                    logged_in = True
+                    if "login" not in page.url and "security" not in page.url and "verifica" not in page.url and "seguridad" not in page.url:
+                        print("DEBUG: Sessão ativa com cookies.")
+                        logged_in = True
+                    else:
+                        print(f"DEBUG: Cookies inválidos ou expirados. Redirecionado para: {page.url}")
                 else:
-                    print(f"DEBUG: Cookies inválidos ou expirados. Redirecionado para: {page.url}")
+                    print("DEBUG: Nenhum cookie foi adicionado com sucesso. Pulando para login direto.")
+            except json.JSONDecodeError as e:
+                print(f"DEBUG: ERRO: Não foi possível decodificar o JSON dos cookies. Verifique o formato no secret. Erro: {e}")
             except Exception as e:
-                print(f"DEBUG: Erro ao carregar cookies ou navegar com eles: {e}")
+                print(f"DEBUG: Erro geral ao tentar login com cookies: {e}")
         
         # Se o login com cookies falhou ou não foi tentado, tenta login direto
         if not logged_in and ml_username and ml_password:
