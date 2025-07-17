@@ -1,49 +1,41 @@
 import os
 import json
 import asyncio
-import time # Importe time para usar time.sleep
+import time
 from playwright.async_api import async_playwright, Page, BrowserContext
 
 # Função para carregar os cookies do JSON
 def load_cookies_from_json(json_string: str) -> list:
     """Converte uma string JSON de cookies em um formato que o Playwright entenda,
-    tratando o atributo sameSite."""
+    tratando o atributo sameSite e garantindo 'url' ou 'domain'."""
     cookies = json.loads(json_string)
-    
-    # Valores válidos para sameSite que o Playwright aceita
-    valid_same_site_values = ["Strict", "Lax", "None"] 
+
+    valid_same_site_values = ["Strict", "Lax", "None"] # Valores aceitos pelo Playwright
 
     for cookie in cookies:
-        # Garante que 'url' esteja presente ou pode ser inferida de 'domain' e 'path'
-        # Playwright prefere 'url' explicitamente.
-        if 'url' not in cookie:
-            if 'domain' in cookie and 'path' in cookie:
-                # Tenta reconstruir a URL. Assume HTTPS para domínios web
-                protocol = "https://"
-                # Para domínios que começam com '.', Playwright espera sem o '.' inicial
+        # --- CORREÇÃO PARA O ERRO 'Cookie should have either url or domain' ---
+        # Se o cookie não tem 'url' e não tem 'domain', ou se 'domain' está vazio/malformado
+        if 'url' not in cookie or not cookie['url']: # Se 'url' não existe ou está vazia
+            if 'domain' in cookie and cookie['domain']: # Se 'domain' existe e não está vazio
                 domain = cookie['domain']
+                # Remover o ponto inicial se houver (ex: .mercadolivre.com.br -> mercadolivre.com.br)
                 if domain.startswith('.'):
                     domain = domain[1:]
-                cookie['url'] = f"{protocol}{domain}{cookie['path']}"
+                # Tentar construir a URL. Assume HTTPS e um path padrão se não houver
+                path = cookie.get('path', '/') # Pega o path do cookie ou usa '/' como padrão
+                cookie['url'] = f"https://{domain}{path}"
             else:
-                # Fallback se 'domain'/'path' também estiverem ausentes. 
-                # Pode indicar um cookie malformado ou não web.
-                cookie['url'] = "https://www.mercadolivre.com.br/" # Um fallback padrão
+                # Se não tem 'url' e 'domain' também não é útil, use um fallback genérico do ML
+                cookie['url'] = "https://www.mercadolivre.com.br/"
+        # --- FIM DA CORREÇÃO 'Cookie should have either url or domain' ---
 
-        # --- CORREÇÃO PARA O ERRO sameSite ---
+        # --- TRATAMENTO PARA O ERRO sameSite (já feito antes) ---
         if 'sameSite' in cookie:
-            # Se o valor não for um dos esperados, ou for vazio, ou for None como bool,
-            # converta para a string "None" esperada pelo Playwright.
             if cookie['sameSite'] not in valid_same_site_values or \
                cookie['sameSite'] == "" or \
-               cookie['sameSite'] is None: # Adiciona verificação para None booleano
+               cookie['sameSite'] is None: 
                 cookie['sameSite'] = "None"
-            # No caso de o exportador de cookies usar 'None' como string, já está correto.
-            # Caso contrário (Strict, Lax), o valor já está ok.
-        else:
-            # Se 'sameSite' não estiver presente, Playwright lida com seu default.
-            pass
-        # --- FIM DA CORREÇÃO sameSite ---
+        # --- FIM TRATAMENTO sameSite ---
 
     return cookies
 
@@ -53,7 +45,7 @@ async def generate_affiliate_links_with_playwright(product_urls: list, affiliate
     Espera que o secret ML_COOKIES_JSON e ML_AFFILIATE_TAG estejam configurados.
     """
     print("Iniciando geração de links de afiliado com Playwright via cookies...")
-    
+
     # 1. Obter o JSON de cookies e a TAG do GitHub Secret (ou hardcoded se preferir temporariamente)
     cookies_json = os.getenv("ML_COOKIES_JSON")
     # Se estiver hardcodando temporariamente por teste, remova a linha acima e use:
@@ -66,7 +58,7 @@ async def generate_affiliate_links_with_playwright(product_urls: list, affiliate
     if not affiliate_tag:
         print("ERRO: A TAG de afiliado não foi definida. Os links podem não ser gerados corretamente.")
         # O bot pode continuar, mas os links gerados podem não ter a TAG
-    
+
     try:
         cookies = load_cookies_from_json(cookies_json)
     except json.JSONDecodeError as e:
@@ -81,7 +73,7 @@ async def generate_affiliate_links_with_playwright(product_urls: list, affiliate
         # Lança o navegador Chromium em modo headless para o GitHub Actions
         # Para testar localmente e VER o navegador, mude headless=True para headless=False
         browser = await p.chromium.launch(headless=True) 
-        
+
         # Cria um novo contexto para a sessão e carrega os cookies
         context = await browser.new_context()
         await context.add_cookies(cookies)
@@ -129,16 +121,16 @@ async def generate_affiliate_links_with_playwright(product_urls: list, affiliate
                 # Voltar para o painel de afiliados para limpar o formulário e garantir que está na página certa
                 await page.goto("https://www.mercadolivre.com.br/affiliate-program/panel", wait_until="load", timeout=30000)
                 await page.wait_for_selector(input_url_selector, timeout=10000) # Espera o campo de input carregar novamente
-                
+
                 await page.fill(input_url_selector, original_url)
-                
+
                 # Clicar no botão e interceptar a resposta da API de geração de link
                 # A requisição 'createLink' é interceptada para pegar os links gerados
                 async with page.expect_response(
                     lambda response: "affiliates/createLink" in response.url and response.status == 200
                 ) as response_info:
                     await page.click(generate_button_selector)
-                
+
                 response_data = await response_info.value.json()
                 item = response_data.get("urls", [{}])[0]
                 short_url = item.get("short_url")
@@ -158,7 +150,7 @@ async def generate_affiliate_links_with_playwright(product_urls: list, affiliate
                 print(f"Erro ao gerar link de afiliado para {original_url}: {e}")
                 shorts.append(None)
                 longs.append(None)
-            
+
             await asyncio.sleep(0.6) # Manter um pequeno delay entre as requisições
 
         await browser.close()
