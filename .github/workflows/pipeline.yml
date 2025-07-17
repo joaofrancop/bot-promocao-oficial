@@ -53,11 +53,5 @@ jobs:
           # TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           # OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
 
-      - name: Commit e Push do CSV (futuro, quando a parte de log estiver no main.py)
-        # Este passo só será ativado quando você integrar o salvamento do CSV no main.py
-        # Ele está comentado por enquanto, para não dar erro se o CSV não for gerado
-        # uses: EndBug/add-and-commit@v9
-        # with:
-        #   add: 'produtos_enviados.csv' # Adiciona seu arquivo CSV de histórico
-        #   message: 'chore(data): Atualiza produtos_enviados.csv com dados da última execução [skip ci]'
-        #   github_token: ${{ secrets.GITHUB_TOKEN }}
+      # O passo de commit e push do CSV foi removido por ser comentado e pode ter causado problemas
+      # Ele será adicionado de volta quando a parte de log estiver no main.py e for ativado.
