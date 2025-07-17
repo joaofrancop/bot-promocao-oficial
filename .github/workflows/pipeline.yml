@@ -1,0 +1,63 @@
+name: Pipeline Completa de Scrapping e Envio (Novo Bot)
+
+on:
+  schedule:
+    # Executa a cada 10 minutos (ajuste conforme sua necessidade)
+    - cron: '*/10 * * * *' # Exemplo: a cada 10 minutos
+    # Horários específicos podem ser úteis para ofertas
+    - cron: '45 9 * * *'  # 06:45 AM BRT
+    - cron: '45 11 * * *' # 08:45 AM BRT
+    - cron: '45 14 * * *' # 11:45 AM BRT
+    - cron: '45 19 * * *' # 04:45 PM BRT
+    - cron: '45 22 * * *' # 07:45 PM BRT
+      
+  workflow_dispatch: # Permite execução manual de toda a pipeline
+
+permissions:
+  contents: write # Necessário para commitar o CSV (futuro) ou outros logs
+
+jobs:
+  full_pipeline:
+    runs-on: ubuntu-latest # Ambiente Linux no GitHub Actions
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: main # Checa a branch principal
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11' # Use uma versão recente que o Playwright suporte bem
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          # Instala os navegadores do Playwright
+          playwright install --with-deps chromium firefox webkit # --with-deps instala dependências de sistema
+
+      - name: Execute Main Bot Script (main.py)
+        run: |
+          python main.py
+        env:
+          # Seus secrets serão passados como variáveis de ambiente para o script Python
+          ML_AFFILIATE_TAG: ${{ secrets.ML_AFFILIATE_TAG }}
+          ML_COOKIES_JSON: ${{ secrets.ML_COOKIES_JSON }}
+          ZATTEN_API_KEY: ${{ secrets.ZATTEN_API_KEY }}
+          ZATTEN_PHONE_NUMBER: ${{ secrets.ZATTEN_PHONE_NUMBER }}
+          ZATTEN_ATTENDANT_ID: ${{ secrets.ZATTEN_ATTENDANT_ID }}
+          # Adicione aqui os secrets para Telegram e OpenAI quando for usá-los
+          # TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          # TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          # OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+
+      - name: Commit e Push do CSV (futuro, quando a parte de log estiver no main.py)
+        # Este passo só será ativado quando você integrar o salvamento do CSV no main.py
+        # Ele está comentado por enquanto, para não dar erro se o CSV não for gerado
+        # uses: EndBug/add-and-commit@v9
+        # with:
+        #   add: 'produtos_enviados.csv' # Adiciona seu arquivo CSV de histórico
+        #   message: 'chore(data): Atualiza produtos_enviados.csv com dados da última execução [skip ci]'
+        #   github_token: ${{ secrets.GITHUB_TOKEN }}
