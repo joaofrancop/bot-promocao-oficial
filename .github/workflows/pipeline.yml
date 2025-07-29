@@ -2,71 +2,57 @@ name: Pipeline Completa de Scrapping e Envio (Novo Bot)
 
 on:
   schedule:
-    # Executa a cada 10 minutos (ajuste conforme sua necessidade)
-    - cron: '*/10 * * * *' # Exemplo: a cada 10 minutos
-    # Horários específicos podem ser úteis para ofertas
     - cron: '45 9 * * *'  # 06:45 AM BRT
     - cron: '45 11 * * *' # 08:45 AM BRT
     - cron: '45 14 * * *' # 11:45 AM BRT
     - cron: '45 19 * * *' # 04:45 PM BRT
     - cron: '45 22 * * *' # 07:45 PM BRT
       
-  workflow_dispatch: # Permite execução manual de toda a pipeline
+  workflow_dispatch: 
 
 permissions:
-  contents: write # Necessário para commitar o CSV (futuro) ou outros logs
-  actions: write # Necessário para upload-artifact
+  contents: write 
+  actions: write 
 
 jobs:
   full_pipeline:
-    runs-on: ubuntu-latest # Ambiente Linux no GitHub Actions
+    runs-on: ubuntu-latest 
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          ref: main # Checa a branch principal
+          ref: main 
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11' # Use uma versão recente que o Playwright suporte bem
+          python-version: '3.11' 
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          # Instala os navegadores do Playwright
-          playwright install --with-deps chromium firefox webkit # --with-deps instala dependências de sistema
+          playwright install --with-deps chromium firefox webkit 
 
       - name: Execute Main Bot Script (main.py)
         run: |
           python main.py
         env:
           ML_AFFILIATE_TAG: ${{ secrets.ML_AFFILIATE_TAG }}
-          ML_SESSION_STATE: ${{ secrets.ML_SESSION_STATE }} 
-          ML_USERNAME: ${{ secrets.ML_USERNAME }}
-          ML_PASSWORD: ${{ secrets.ML_PASSWORD }}
+          ML_CLIENT_ID: ${{ secrets.ML_CLIENT_ID }} # NOVO SECRET
+          ML_CLIENT_SECRET: ${{ secrets.ML_CLIENT_SECRET }} # NOVO SECRET
+          ML_REFRESH_TOKEN: ${{ secrets.ML_REFRESH_TOKEN }} # NOVO SECRET
+          ML_REDIRECT_URI: ${{ secrets.ML_REDIRECT_URI }} # NOVO SECRET (se precisar passar para o bot)
           ZATTEN_API_KEY: ${{ secrets.ZATTEN_API_KEY }}
           ZATTEN_PHONE_NUMBER: ${{ secrets.ZATTEN_PHONE_NUMBER }}
           ZATTEN_ATTENDANT_ID: ${{ secrets.ZATTEN_ATTENDANT_ID }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }} 
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}     
-          # Adicione aqui os secrets para OpenAI quando for usá-los
-          # OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
 
-      # --- NOVO PASSO: UPLOAD DO ARTIFACT DE DEBUG ---
       - name: Upload Scraped Products Sample
         uses: actions/upload-artifact@v4 
         with:
           name: scraped-products-sample
           path: debug_scraped_products_sample.csv 
           retention-days: 1 
-      # --- FIM NOVO PASSO ---
-
-      # O passo de commit e push do CSV (futuro)
-      # uses: EndBug/add-and-commit@v9
-      # with:
-      #   add: 'produtos_enviados.csv' 
-      #   message: 'chore(data): Atualiza produtos_enviados.csv com dados da última execução [skip ci]'
-      #   github_token: ${{ secrets.GITHUB_TOKEN }}
