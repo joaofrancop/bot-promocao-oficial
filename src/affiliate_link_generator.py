@@ -4,7 +4,7 @@ import asyncio
 import time
 from playwright.async_api import async_playwright, Page, BrowserContext, expect
 
-# Função para carregar os cookies do JSON (VERSÃO COM LOGS DE DEBUG E ADIÇÃO INDIVIDUAL)
+# Função para carregar os cookies do JSON (VERSÃO COM LOGS DE DEBUG APROFUNDADOS)
 def load_cookies_from_json(json_string: str) -> list:
     """Converte uma string JSON de cookies em um formato que o Playwright entenda,
     tratando atributos como sameSite, url/domain e expires para garantir compatibilidade.
@@ -150,7 +150,8 @@ async def generate_affiliate_links_with_playwright(product_urls: list, affiliate
     
     ml_username = os.getenv("ML_USERNAME")
     ml_password = os.getenv("ML_PASSWORD")
-    cookies_json = os.getenv("ML_COOKIES_JSON")
+    ml_session_state_json = os.getenv("ML_SESSION_STATE") # NOVO SECRET
+    cookies_json = os.getenv("ML_COOKIES_JSON") # Mantido para fallback de cookies diretos
 
     if not affiliate_tag:
         print("ERRO: A TAG de afiliado não foi definida. Os links podem não ser gerados corretamente.")
@@ -161,23 +162,45 @@ async def generate_affiliate_links_with_playwright(product_urls: list, affiliate
 
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True) 
-        context = await browser.new_context()
-        page = await context.new_page()
+        context = None # Inicializa context como None
+        page = None # Inicializa page como None
 
         logged_in = False
 
-        # Tentar login com cookies primeiro (se ML_COOKIES_JSON estiver presente)
-        if cookies_json:
-            print("DEBUG: Tentando login com cookies...")
+        # --- Tentar carregar estado da sessão (ML_SESSION_STATE) ---
+        if ml_session_state_json:
+            print("DEBUG: Tentando carregar estado da sessão do Playwright (ML_SESSION_STATE)...")
             try:
-                raw_cookies = json.loads(cookies_json) # Carrega o JSON bruto
-                processed_cookies_for_playwright = load_cookies_from_json(cookies_json) # Processa os cookies
+                session_state = json.loads(ml_session_state_json)
+                context = await browser.new_context(storage_state=session_state)
+                page = await context.new_page()
+                
+                await page.goto("https://www.mercadolivre.com.br/affiliate-program/panel", wait_until="load", timeout=30000)
+                if "login" not in page.url and "security" not in page.url and "verifica" not in page.url and "seguridad" not in page.url:
+                    print("DEBUG: Sessão ativa carregada do estado salvo (ML_SESSION_STATE).")
+                    logged_in = True
+                else:
+                    print(f"DEBUG: Estado da sessão inválido ou expirado (ML_SESSION_STATE). Redirecionado para: {page.url}")
+                    # Se o estado falhou, fechar o contexto e tentar outra abordagem
+                    await context.close() 
+                    context = None # Resetar contexto
+            except Exception as e:
+                print(f"DEBUG: ERRO ao carregar ou usar estado da sessão (ML_SESSION_STATE): {e}")
+                context = None # Resetar contexto
+        
+        # --- Tentar login com cookies (ML_COOKIES_JSON) se o estado da sessão falhou ---
+        if not logged_in and cookies_json:
+            print("DEBUG: Estado da sessão falhou ou não fornecido. Tentando login com cookies (ML_COOKIES_JSON)...")
+            if not context: # Se o contexto não foi criado antes (porque ML_SESSION_STATE falhou)
+                context = await browser.new_context() 
+                page = await context.new_page() # Nova página para o novo contexto
+            try:
+                processed_cookies_for_playwright = load_cookies_from_json(cookies_json) 
 
-                # --- NOVO BLOCO: ADICIONAR COOKIES UM POR UM PARA DEBUG ---
                 successful_cookies_count = 0
                 for i, cookie_obj in enumerate(processed_cookies_for_playwright):
                     try:
-                        await context.add_cookies([cookie_obj]) # Tenta adicionar um cookie por vez
+                        await context.add_cookies([cookie_obj]) 
                         successful_cookies_count += 1
                         print(f"DEBUG: Cookie '{cookie_obj.get('name', 'N/A')}' adicionado com sucesso. ({successful_cookies_count}/{len(processed_cookies_for_playwright)})")
                     except Exception as e:
@@ -186,7 +209,6 @@ async def generate_affiliate_links_with_playwright(product_urls: list, affiliate
                 
                 if successful_cookies_count > 0:
                     print(f"DEBUG: Total de {successful_cookies_count} cookies adicionados com sucesso.")
-                    # Agora, tente navegar para o painel para verificar a sessão
                     await page.goto("https://www.mercadolivre.com.br/affiliate-program/panel", wait_until="load", timeout=30000)
                     print(f"DEBUG: URL após tentar ir para painel de afiliados com cookies: {page.url}")
 
@@ -202,14 +224,17 @@ async def generate_affiliate_links_with_playwright(product_urls: list, affiliate
             except Exception as e:
                 print(f"DEBUG: Erro geral ao tentar login com cookies: {e}")
         
-        # Se o login com cookies falhou ou não foi tentado, tenta login direto
+        # --- Tentar login direto (ML_USERNAME/ML_PASSWORD) se todas as outras falharam ---
         if not logged_in and ml_username and ml_password:
-            print("DEBUG: Tentando login direto com usuário e senha...")
+            print("DEBUG: Todas as tentativas de cookies falharam. Tentando login direto com usuário e senha...")
+            if not context: # Se o contexto não foi criado antes
+                context = await browser.new_context()
+                page = await context.new_page()
             logged_in = await perform_ml_login(page, ml_username, ml_password)
         
         if not logged_in:
-            print("ERRO FATAL: Não foi possível fazer login no Mercado Livre com cookies ou credenciais diretas.")
-            print("Por favor, verifique ML_COOKIES_JSON, ML_USERNAME/ML_PASSWORD e desative 2FA se possível.")
+            print("ERRO FATAL: Não foi possível fazer login no Mercado Livre com NENHUM método (estado da sessão, cookies ou credenciais diretas).")
+            print("Por favor, verifique ML_SESSION_STATE, ML_COOKIES_JSON, ML_USERNAME/ML_PASSWORD e desative 2FA se possível.")
             await browser.close()
             return [None] * len(product_urls), [None] * len(product_urls)
 
