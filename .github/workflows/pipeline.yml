@@ -3,7 +3,7 @@ name: Pipeline Completa de Scrapping e Envio (Novo Bot)
 on:
   schedule:
     # Executa a cada 10 minutos (ajuste conforme sua necessidade)
-    #- cron: '*/10 * * * *' # Exemplo: a cada 10 minutos
+    - cron: '*/10 * * * *' # Exemplo: a cada 10 minutos
     # Horários específicos podem ser úteis para ofertas
     - cron: '45 9 * * *'  # 06:45 AM BRT
     - cron: '45 11 * * *' # 08:45 AM BRT
@@ -15,6 +15,7 @@ on:
 
 permissions:
   contents: write # Necessário para commitar o CSV (futuro) ou outros logs
+  actions: write # Necessário para upload-artifact
 
 jobs:
   full_pipeline:
@@ -42,16 +43,30 @@ jobs:
         run: |
           python main.py
         env:
-          # Seus secrets serão passados como variáveis de ambiente para o script Python
           ML_AFFILIATE_TAG: ${{ secrets.ML_AFFILIATE_TAG }}
-          ML_COOKIES_JSON: ${{ secrets.ML_COOKIES_JSON }}
+          ML_SESSION_STATE: ${{ secrets.ML_SESSION_STATE }} 
+          ML_USERNAME: ${{ secrets.ML_USERNAME }}
+          ML_PASSWORD: ${{ secrets.ML_PASSWORD }}
           ZATTEN_API_KEY: ${{ secrets.ZATTEN_API_KEY }}
           ZATTEN_PHONE_NUMBER: ${{ secrets.ZATTEN_PHONE_NUMBER }}
           ZATTEN_ATTENDANT_ID: ${{ secrets.ZATTEN_ATTENDANT_ID }}
-          # Adicione aqui os secrets para Telegram e OpenAI quando for usá-los
-          # TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          # TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }} 
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}     
+          # Adicione aqui os secrets para OpenAI quando for usá-los
           # OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
 
-      # O passo de commit e push do CSV foi removido por ser comentado e pode ter causado problemas
-      # Ele será adicionado de volta quando a parte de log estiver no main.py e for ativado.
+      # --- NOVO PASSO: UPLOAD DO ARTIFACT DE DEBUG ---
+      - name: Upload Scraped Products Sample
+        uses: actions/upload-artifact@v4 
+        with:
+          name: scraped-products-sample
+          path: debug_scraped_products_sample.csv 
+          retention-days: 1 
+      # --- FIM NOVO PASSO ---
+
+      # O passo de commit e push do CSV (futuro)
+      # uses: EndBug/add-and-commit@v9
+      # with:
+      #   add: 'produtos_enviados.csv' 
+      #   message: 'chore(data): Atualiza produtos_enviados.csv com dados da última execução [skip ci]'
+      #   github_token: ${{ secrets.GITHUB_TOKEN }}
