@@ -4,8 +4,8 @@ import os
 import sys 
 import re 
 import numpy as np 
-from src.affiliate_link_generator import generate_affiliate_links_with_playwright
-from src.telegram_notifier import send_telegram_message # Importa o notifier do Telegram
+from src.affiliate_link_generator import generate_affiliate_links_with_playwright, perform_ml_login, load_cookies_from_json # Importa tudo do affiliate_link_generator
+from src.telegram_notifier import send_telegram_message 
 
 # Importações para o scraping do Mercado Livre
 from bs4 import BeautifulSoup
@@ -14,8 +14,10 @@ import time as time_sleep_module
 
 # --- Configurações Iniciais ---
 ML_AFFILIATE_TAG = os.getenv("ML_AFFILIATE_TAG")
-ML_USERNAME = os.getenv("ML_USERNAME") 
-ML_PASSWORD = os.getenv("ML_PASSWORD") 
+# Credenciais OAuth
+ML_CLIENT_ID = os.getenv("ML_CLIENT_ID")
+ML_CLIENT_SECRET = os.getenv("ML_CLIENT_SECRET")
+ML_REFRESH_TOKEN = os.getenv("ML_REFRESH_TOKEN") # NOVO SECRET
 
 # Credenciais do Telegram
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN") 
@@ -29,7 +31,6 @@ if not ML_AFFILIATE_TAG:
 # Verificar se as credenciais do Telegram estão definidas
 if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
     print("AVISO: Credenciais do Telegram não definidas. O bot não enviará mensagens para o Telegram.")
-    # Não sys.exit(1) aqui, para permitir que o bot continue outras operações
 
 # --- Constantes para scraping ---
 MAX_RETRIES = 3
@@ -178,8 +179,7 @@ async def main():
         return
 
     # 2. Geração de Links de Afiliado com Playwright
-    # Passamos os links originais e a TAG para o módulo Playwright
-    # ATENÇÃO: Se a geração de links falhar, usaremos os links originais como fallback
+    # ATENÇÃO: A função generate_affiliate_links_with_playwright agora usa OAuth
     short_links, long_links = await generate_affiliate_links_with_playwright(
         products_df["Link"].tolist(), ML_AFFILIATE_TAG
     )
@@ -212,11 +212,9 @@ async def main():
 
     # --- Lógica de Envio para Telegram ---
     print("\nIniciando envio de mensagens para o Telegram...")
-    # Condição para enviar: apenas se os secrets do Telegram estiverem configurados
     if TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID:
-        # Enviar produtos com maiores descontos (ex: os 5 primeiros)
         print("Enviando produtos com maiores descontos para o Telegram...")
-        for index, row in df_descontos.head(5).iterrows(): # Limitar a 5 para teste
+        for index, row in df_descontos.head(5).iterrows(): 
             message_text = (
                 f"*{row['Nome']}*\n\n"
                 f"~De: R$ {row['Preço De']}~\n"
@@ -229,26 +227,20 @@ async def main():
                 TELEGRAM_BOT_TOKEN, 
                 TELEGRAM_CHAT_ID, 
                 message_text, 
-                image_url=row['Imagem'] # Envia a imagem do produto
+                image_url=row['Imagem'] 
             )
             if response and response.get('ok'):
                 print(f"Mensagem para '{row['Nome']}' enviada com sucesso para o Telegram.")
             else:
                 print(f"Falha ao enviar mensagem para '{row['Nome']}' para o Telegram: {response}")
-            await asyncio.sleep(2) # Pequeno delay entre mensagens
+            await asyncio.sleep(2) 
         
     else:
         print("Credenciais do Telegram não configuradas. Pulando envio para Telegram.")
     # --- Fim Lógica de Envio para Telegram ---
 
-    # (Aqui viria a lógica de Zatten notifier, e Database Manager)
     print("\nDEBUG: Envio para Zatten seria aqui (requer instância de WhatsApp conectada).")
     print("DEBUG: Salvamento do histórico em banco de dados ou CSV seria aqui.")
     
-    # Exemplo: Salvar para CSV temporário para verificar
-    # products_df.to_csv("products_with_affiliate_links.csv", index=False)
-    # print("Produtos com links de afiliado salvos em products_with_affiliate_links.csv")
-
-
 if __name__ == "__main__":
     asyncio.run(main())
